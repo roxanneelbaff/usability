@@ -4,7 +4,10 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import re
 import datetime
+import pylab
+import statistics
 from tabulate import tabulate
+from sklearn import preprocessing
 
 # -------------------------------------------------------------------------- #
 # Constants
@@ -14,7 +17,10 @@ TIME_BISON = 'time_bison'
 TIME_PROTO = 'time_proto'
 CLICKS_BISON = 'clicks_bison'
 CLICKS_PROTO = 'clicks_proto'
+BISON = 'bison'
+PROTO = 'prototype'
 FILE_NAME = 'a7.csv'
+SUS_FILE = 'sus.csv'
 NA_VALUE = '0'
 
 
@@ -32,8 +38,8 @@ def plot_bar_chart(n, data_bar1, data_bar2, ylabel, title, xlabels, legends):
     ind = np.arange(n)
     width = 0.35
     fig, ax = plt.subplots()
-    rects1 = ax.bar(ind, data_bar1, width, color='b') #, yerr=menStd)
-    rects2 = ax.bar(ind + width, data_bar2, width, color='y') #, yerr=womenStd)
+    rects1 = ax.bar(ind, data_bar1, width, color='#006a96') #, yerr=menStd)
+    rects2 = ax.bar(ind + width, data_bar2, width, color='#3C3838') #, yerr=womenStd)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.set_xticks(ind + width)
@@ -45,21 +51,35 @@ def plot_bar_chart(n, data_bar1, data_bar2, ylabel, title, xlabels, legends):
 def box_plot (data, title):
     fig, ax = plt.subplots()
     ax.boxplot(data)
-    ax.set_title(title)
+   # ax.set_title(title)
+    ax.set_xticklabels(['BISON', 'Prototype'])
     plt.show()
 
 
 def format(dec):
     return '{0:.5f}'.format(dec)
+
+def qqplot(data, title):
+    stats.probplot(data, dist="norm", plot=pylab)
+    pylab.title(title)
+    pylab.show()
+
 # -------------------------------------------------------------------------- #
 # Data - Fetching & Cleaning
 # -------------------------------------------------------------------------- #
 # Data - Fetching
 data = pd.read_csv(FILE_NAME, sep=',', na_values= NA_VALUE)
-# Data - Cleaning: Converting mm:ss to seconds
+sus_data = pd.read_csv(SUS_FILE, sep=',', na_values= NA_VALUE)
+#Data - Cleaning: Converting mm:ss to seconds
 data[TIME_BISON] = data[TIME_BISON].apply(to_seconds)
 data[TIME_PROTO] = data[TIME_PROTO].apply(to_seconds)
+# df = pd.DataFrame(data)
+# df.to_csv("a7_time.csv", delimiter=",")
 
+# #normilize
+# data = pd.read_csv("a7_time.csv", sep=',', na_values= NA_VALUE)
+# data = preprocessing.normalize(data)
+# np.savetxt("a7_normalized.csv", data, delimiter=",")
 # -------------------------------------------------------------------------- #
 # Data - Processing
 # -------------------------------------------------------------------------- #
@@ -73,16 +93,17 @@ time_bison = []
 time_proto = []
 clicks_bison = []
 clicks_proto = []
-tasks_ttest_dict = {}
-tasks_time_ttest_dict = []
-tasks_clicks_ttest_dict = []
+tasks_stattest_dict = {}
+tasks_time_stattest_dict = []
+tasks_clicks_stattest_dict = []
 # Group data by tasks
-### data = data[data['expertise'] == 'novice']
+
+data = data[data['expertise'] == 'Expert']
 grouped_by_task = data.groupby(TASK)
 
 # For each task:
 # -------------
-# (1) Boxplot time/clicks,
+# (1) Boxplot time/clicks,   Shapiro, QQplots
 # (2) Get the means of clicks, time,
 # (3) Calculate the t-test paired sample
 for task, value in grouped_by_task:
@@ -92,11 +113,32 @@ for task, value in grouped_by_task:
     box_plot([value[CLICKS_BISON], value[CLICKS_PROTO]],
             'Task' + str(task) + ' Clicks')
 
+    # Draw qqplot for normalization visualisation
+    qqplot(value[TIME_BISON], 'Task' + str(task) + ' Bison Time')
+    qqplot(value[TIME_PROTO], 'Task' + str(task) + ' Proto Time')
+    qqplot(value[CLICKS_BISON], 'Task' + str(task) + ' Bison Clicks')
+    qqplot(value[CLICKS_PROTO], 'Task' + str(task) + ' Proto Clicks')
+
+    # Shapiro normalized test
+    print 'Time proto', task
+    stat, p = stats.shapiro(value[TIME_PROTO])
+    print stat, p
+    print 'Time bison', task
+    stat, p = stats.shapiro(value[TIME_BISON])
+    print stat, p
+    print 'Clicks proto', task
+    stat, p = stats.shapiro(value[CLICKS_PROTO])
+    print stat, p
+    print 'Clicks bison', task
+    stat, p = stats.shapiro(value[CLICKS_BISON])
+    print stat, p
+    print '-------------------------------------------------'
+
     # (2) Save the means
-    time_bison.append(value[TIME_BISON].mean())
-    time_proto.append(value[TIME_PROTO].mean())
-    clicks_bison.append(value[CLICKS_BISON].mean())
-    clicks_proto.append(value[CLICKS_PROTO].mean())
+    time_bison.insert(task, value[TIME_BISON].mean())
+    time_proto.insert(task, value[TIME_PROTO].mean())
+    clicks_bison.insert(task, value[CLICKS_BISON].mean())
+    clicks_proto.insert(task, value[CLICKS_PROTO].mean())
 
     means = [
         task, value[CLICKS_PROTO].mean(),
@@ -106,32 +148,54 @@ for task, value in grouped_by_task:
     ]
     tasks_means.append(means)
 
-    # (3) Calculate the t-test paired sample
-    ttest_stat, p_value = stats.ttest_rel(value[TIME_BISON], value[TIME_PROTO] )
+    # (3) Calculate the Wilcoxon
+    #ttest_stat, p_value = stats.ttest_rel(value[TIME_BISON], value[TIME_PROTO] )
+    ttest_stat, p_value = stats.wilcoxon(value[TIME_BISON], value[TIME_PROTO])
     p_value = p_value/2  # one tailed
-    #tasks_ttest_dict['TIME_' + str(task)] = {'ttest_stat':ttest_stat, 'p_value':p_value}
+    tasks_stattest_dict['TIME_' + str(task)] = {'t':ttest_stat, 'p_value':p_value}
 
-    tasks_time_ttest_dict.insert(task, p_value)
-    ttest_stat, p_value  = stats.ttest_rel(value[CLICKS_BISON], value[CLICKS_PROTO] )
+    tasks_time_stattest_dict.insert(task, p_value)
+    # ttest_stat, p_value  = stats.ttest_rel(value[CLICKS_BISON], value[CLICKS_PROTO] )
+    ttest_stat, p_value  = stats.wilcoxon(value[CLICKS_BISON], value[CLICKS_PROTO] )
     p_value = p_value/2 # one tailed
-    #tasks_ttest_dict['CLICKS_' + str(task)] = {'ttest_stat': ttest_stat, 'p_value':p_value}
-    tasks_clicks_ttest_dict.insert(task, p_value)
+    tasks_stattest_dict['CLICKS_' + str(task)] = {'t': ttest_stat, 'p_value':p_value}
+    tasks_clicks_stattest_dict.insert(task, p_value)
 
-tasks_ttest_dict['TIME'] = tasks_time_ttest_dict
-tasks_ttest_dict['CLICKS'] = tasks_clicks_ttest_dict
+# sus - Wilcoxon
+# ------------------
+ttest_stat_sus, p_value_sus  = stats.wilcoxon(sus_data[BISON], sus_data[PROTO] )
+p_value_sus = p_value_sus/2 # one tailed
+print 'SUS Latest'
+print   ttest_stat_sus,   p_value_sus
+print 'SUS Bison', stats.shapiro(sus_data[BISON])
+qqplot(sus_data[BISON], 'SUS Bison')
+print 'SUS Proto', stats.shapiro(sus_data[PROTO])
+qqplot(sus_data[PROTO], 'SUS Proto')
+
 
 # PART 2 - Novice VS. Experts:
 # ----------------------------
-# ttest independent : Novice VS. Expert
-expertise_ttest_ind_dict = {}
+# Mann WhitneyU : Novice VS. Expert
+expertise_mannwhitneyu_dict = {}
 novice_data = data[data['expertise'] == 'novice']
 experts_data = data[data['expertise'] == 'Expert']
-box_plot([experts_data[TIME_BISON], novice_data[TIME_BISON]], 'novice and experts')
-box_plot([experts_data[CLICKS_BISON], novice_data[CLICKS_BISON]], 'novice and experts')
-t, p = stats.ttest_ind(novice_data[TIME_BISON], experts_data[TIME_BISON],equal_var=False )
-expertise_ttest_ind_dict['NOVICE_EXPERT_TIME'] = {'ttest_stat': t, 'p_value':p/2}
-t, p = stats.ttest_ind(novice_data[CLICKS_BISON], experts_data[CLICKS_BISON],equal_var=False )
-expertise_ttest_ind_dict['NOVICE_EXPERT_CLICKS'] = {'ttest_stat': t, 'p_value':p/2}
+
+# SHAPIRO Normalisation test
+print 'Novice Time', stats.shapiro(novice_data[TIME_BISON])
+print 'Expert Time', stats.shapiro(experts_data[TIME_BISON])
+print 'Novice Clicks', stats.shapiro(novice_data[CLICKS_BISON])
+print 'Expert Clicks', stats.shapiro(experts_data[CLICKS_BISON])
+
+# Box plots
+box_plot([experts_data[TIME_BISON], novice_data[TIME_BISON]], 'novice and experts (Time)')
+box_plot([experts_data[CLICKS_BISON], novice_data[CLICKS_BISON]], 'novice and experts (Clicks)')
+
+# mann whitney u
+t, p = stats.mannwhitneyu(novice_data[TIME_BISON], experts_data[TIME_BISON] )
+expertise_mannwhitneyu_dict['NOVICE_EXPERT_TIME'] = {'t': t, 'p_value': p / 2}
+t, p = stats.mannwhitneyu(novice_data[CLICKS_BISON], experts_data[CLICKS_BISON])
+expertise_mannwhitneyu_dict['NOVICE_EXPERT_CLICKS'] = {'t': t, 'p_value': p / 2}
+
 
 # -------------------------------------------------------------------------- #
 # Show Results
@@ -142,33 +206,29 @@ print tabulate(tasks_means,
                tablefmt='orgtbl')
 
 # show results - Bar chart of means
+print time_bison
+print time_proto
 plot_bar_chart(4, time_bison, time_proto,
                'Time (sec.)',
-               'The mean of time taken for each task',
-               ('Task 1', 'Task 2', 'Task 3', 'Task 4'),
+               'The Mean Time Taken for Each Task',
+               ('Course Search', 'Grades','Exam Search', 'Certificate'),
                ('BISON', 'Prototype')
                )
 
 plot_bar_chart(4, clicks_bison, clicks_proto,
                '# of clicks',
-               'The mean of number of clicks for each task',
-               ('Task 1', 'Task 2', 'Task 3', 'Task 4'),
+               'The Mean Number of Clicks Taken for Each Task',
+               ('Course Search', 'Grades','Exam Search', 'Certificate'),
                ('BISON', 'Prototype')
                )
 
 # ttest pairs
-print tasks_ttest_dict
-## Output
-#{'TIME_4': {'p_value': 0.0019461150331658817, 'ttest_stat': array(3.4516015577315913)}, 'TIME_1': {'p_value': 0.00026443859375419097, 'ttest_stat': array(4.469844450734681)}, 'TIME_2': {'p_value': 0.044775090508509405, 'ttest_stat': array(1.8241009901323422)}, 'TIME_3': {'p_value': 0.0035975052158679363, 'ttest_stat': array(3.1427193137481666)}, 'CLICKS_2': {'p_value': 0.0080660592945765754, 'ttest_stat': array(2.734377913310204)}, 'CLICKS_3': {'p_value': 0.0069484412872638486, 'ttest_stat': array(2.8102560762812057)}, 'CLICKS_1': {'p_value': 0.00015596136320071178, 'ttest_stat': array(4.747490811377417)}, 'CLICKS_4': {'p_value': 0.00017550130544991013, 'ttest_stat': array(4.685015164181178)}}
-#only novice --> {'TIME_4': {'p_value': 0.0037246973859562816, 'ttest_stat': array(3.960276708308093)}, 'TIME_1': {'p_value': 0.010471343359195169, 'ttest_stat': array(3.106477773709748)}, 'TIME_2': {'p_value': 0.039875843139679963, 'ttest_stat': array(2.1065549393871805)}, 'TIME_3': {'p_value': 0.028586241188708603, 'ttest_stat': array(2.3485392923120467)}, 'CLICKS_2': {'p_value': 0.013389759087523075, 'ttest_stat': array(2.9157373664724853)}, 'CLICKS_3': {'p_value': 0.046185931838798627, 'ttest_stat': array(2.0004252604768453)}, 'CLICKS_1': {'p_value': 0.010656353778825157, 'ttest_stat': array(3.0927549724742005)}, 'CLICKS_4': {'p_value': 0.0059660784104922831, 'ttest_stat': array(3.5596528070971436)}}
+print tasks_stattest_dict
 
 # ttest independent (experts vs. novice)
-print expertise_ttest_ind_dict
-#{'NOVICE_EXPERT_CLICKS': {'p_value': 0.020290647369952619, 'ttest_stat': array(2.126975542413645)}, 'NOVICE_EXPERT_TIME': {'p_value': 0.0071760661115828081, 'ttest_stat': array(2.582157230208339)}}
+print expertise_mannwhitneyu_dict
 
+print 'SUS p-value', expertise_mannwhitneyu_dict
+print ttest_stat_sus
 
-
-
-print "{:<8} {:<10} {:<10} {:<10} {:<10} {:<25}".format('', 'Task 1','Task 2','Task 3', 'Task 4', 'Experts VS. Novice')
-for k, v in tasks_ttest_dict.iteritems():
-    print "{:<8} {:<10} {:<10} {:<10} {:<10}".format(k, format(v[0]), format(v[1]),format(v[2]),format(v[3]))
+print 'SUS p-value', format(p_value_sus)
